@@ -1089,7 +1089,7 @@ function App() {
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={
                       remaining === 3
-                        ? "第一部：最“像你”的电影（中文 / 英文都可以）..."
+                        ? "第一部：最“像你”的电影（请输入英文电影名）..."
                         : remaining === 2
                         ? "第二部：最近反复想起的一部电影..."
                         : "最后一部：补上一块你口味版图中还缺的那块..."
