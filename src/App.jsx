@@ -426,12 +426,15 @@ async function fetchMovieDetailById(id) {
   };
 }
 
-// 搜索候选列表
+// 搜索候选列
+// 搜索候选列表（支持中文片名）
 async function searchMoviesByTitle(rawQuery) {
   const trimmed = rawQuery.trim();
   if (!trimmed) return [];
+
   const containsChinese = hasChinese(trimmed);
 
+  // 没有 OMDb Key 时：完全使用本地 mock 数据
   if (!OMDB_KEY) {
     const lower = trimmed.toLowerCase();
     const filtered = mockMovies.filter((m) =>
@@ -440,38 +443,76 @@ async function searchMoviesByTitle(rawQuery) {
     return (filtered.length ? filtered : mockMovies).slice(0, 8);
   }
 
-  let searchTerm = trimmed;
+  // 构造一组要依次尝试的“搜索关键字”
+  // 1. 如果是中文：先用用户输入的原始中文去查 OMDb
+  // 2. 如果我们有手动的中英映射，再追加一次英文标题尝试
+  // 3. 如果是纯英文，就只用原始输入
+  const searchTerms = [];
   if (containsChinese) {
+    // 先用原始中文搜索
+    searchTerms.push(trimmed);
+
+    // 再看看映射表里有没有对应英文，有的话追加一次尝试
     const mapped = mapChineseTitle(trimmed);
-    if (!mapped) {
-      const lower = searchTerm.toLowerCase();
-      const filtered = mockMovies.filter((m) =>
-        m.title.toLowerCase().includes(lower)
-      );
-      return (filtered.length ? filtered : mockMovies).slice(0, 8);
+    if (mapped && mapped.toLowerCase() !== trimmed.toLowerCase()) {
+      searchTerms.push(mapped);
     }
-    searchTerm = mapped;
+  } else {
+    searchTerms.push(trimmed);
   }
 
-  const params = new URLSearchParams({
-    apikey: OMDB_KEY,
-    s: searchTerm,
-    type: "movie",
-    page: "1",
-  });
-  const res = await fetch(`${OMDB_BASE}?${params.toString()}`);
-  const data = await res.json();
-  if (data.Response === "False" || !data.Search) {
-    const lower = searchTerm.toLowerCase();
+  // 用来去重的 Map（按 imdbID）
+  const moviesById = new Map();
+
+  // 依次用不同 searchTerm 去 OMDb 搜索
+  for (const term of searchTerms) {
+    const params = new URLSearchParams({
+      apikey: OMDB_KEY,
+      s: term,
+      type: "movie",
+      page: "1",
+    });
+
+    try {
+      const res = await fetch(`${OMDB_BASE}?${params.toString()}`);
+      const data = await res.json();
+
+      if (data.Response === "False" || !data.Search) {
+        // 这个关键字没查到，试下一个
+        continue;
+      }
+
+      // 把结果塞进 Map 去重
+      data.Search.forEach((item) => {
+        if (!moviesById.has(item.imdbID)) {
+          moviesById.set(item.imdbID, mapSearchItemToMovie(item));
+        }
+      });
+
+      // 已经凑够 8 部就可以停止了
+      if (moviesById.size >= 8) break;
+    } catch (err) {
+      console.error("OMDb search error:", err);
+      // 当前关键字失败，不影响后面的关键字
+      continue;
+    }
+  }
+
+  const result = Array.from(moviesById.values());
+
+  // 如果 OMDb 两轮都一个没找到，最后再退回到本地 mock 数据
+  if (result.length === 0) {
+    const lower = trimmed.toLowerCase();
     const filtered = mockMovies.filter((m) =>
       m.title.toLowerCase().includes(lower)
     );
     return (filtered.length ? filtered : mockMovies).slice(0, 8);
   }
-  const mapped = data.Search.map(mapSearchItemToMovie);
-  const withPoster = mapped.filter((m) => !!m.poster);
+
+  // 优先展示有海报的
+  const withPoster = result.filter((m) => !!m.poster);
   if (withPoster.length >= 4) return withPoster.slice(0, 8);
-  return mapped.slice(0, 8);
+  return result.slice(0, 8);
 }
 
 /** 计算三部电影的“特征” */
@@ -988,7 +1029,7 @@ function App() {
                 定义你的观影人格
               </h1>
               <p className="mt-4 text-sm md:text-base text-slate-300 max-w-xl mx-auto">
-                输入任意一部你最近喜欢的电影（支持中文片名），我们会给你候选列表；
+                输入任意一部你最近喜欢的电影（仅支持英文），我们会给你候选列表；
                 三次选择完成后，CineEcho 会为你生成一份观影人格报告，并配上一张虚拟形象海报和 MBTI 参考。
               </p>
 
