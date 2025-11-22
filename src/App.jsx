@@ -427,7 +427,7 @@ async function fetchMovieDetailById(id) {
 }
 
 // 搜索候选列
-// 搜索候选列表（支持中文片名）
+// 搜索候选列表（仅支持英文名）
 async function searchMoviesByTitle(rawQuery) {
   const trimmed = rawQuery.trim();
   if (!trimmed) return [];
